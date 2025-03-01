@@ -90,33 +90,17 @@ func (f backendFactory) initProducer(ctx context.Context, remote *config.Backend
 			}
 			headers[k] = headerValues
 		}
-		// Define persistência como padrão true
-persistent := true
-if val, ok := r.Params["persistent"]; ok {
-	// Aqui, você pode converter o valor para bool, se necessário
-	parsed, err := strconv.ParseBool(val)
-	if err == nil {
-		persistent = parsed
-	}
-}
-
-var deliveryMode uint8
-if persistent {
-	deliveryMode = 2 // persistente
-} else {
-	deliveryMode = 1 // não persistente
-}
-
-pub := amqp.Publishing{
-	Headers:      headers,
-	ContentType:  contentType,
-	Body:         body,
-	Timestamp:    time.Now(),
-	Expiration:   r.Params[cfg.ExpirationKey],
-	ReplyTo:      r.Params[cfg.ReplyToKey],
-	MessageId:    r.Params[cfg.MessageIdKey],
-	DeliveryMode: deliveryMode,
-}
+		
+		pub := amqp.Publishing{
+			Headers:     headers,
+			ContentType: contentType,
+			Body:        body,
+			Timestamp:   time.Now(),
+			Expiration:  r.Params[cfg.ExpirationKey],
+			ReplyTo:     r.Params[cfg.ReplyToKey],
+			MessageId:   r.Params[cfg.MessageIdKey],
+			DeliveryMode: 2,
+		}
 
 		if len(r.Headers["Content-Type"]) > 0 {
 			pub.ContentType = r.Headers["Content-Type"][0]

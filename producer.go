@@ -18,6 +18,11 @@ import (
 
 const producerNamespace = "github.com/devopsfaith/krakend-amqp/produce"
 
+// Definindo constante para o modo de entrega persistente para clareza
+const (
+	PersistentDeliveryMode = 2 // DeliveryMode 2 = Persistent
+)
+
 var errNoProducerCfgDefined = errors.New("no amqp producer defined")
 
 func getProducerConfig(remote *config.Backend) (*producerCfg, error) {
@@ -70,7 +75,7 @@ func (f backendFactory) initProducer(ctx context.Context, remote *config.Backend
 		connHandler.conn.Close()
 	}
 
-	f.logger.Debug(logPrefix, "Producer attached")
+	f.logger.Debug(logPrefix, "Persistent Producer attached")
 	go func() {
 		<-ctx.Done()
 		connHandler.conn.Close()
@@ -91,15 +96,16 @@ func (f backendFactory) initProducer(ctx context.Context, remote *config.Backend
 			headers[k] = headerValues
 		}
 		
+		// Configurando a mensagem com delivery mode persistente
 		pub := amqp.Publishing{
-			Headers:     headers,
-			ContentType: contentType,
-			Body:        body,
-			Timestamp:   time.Now(),
-			Expiration:  r.Params[cfg.ExpirationKey],
-			ReplyTo:     r.Params[cfg.ReplyToKey],
-			MessageId:   r.Params[cfg.MessageIdKey],
-			DeliveryMode: 2,
+			Headers:      headers,
+			ContentType:  contentType,
+			Body:         body,
+			Timestamp:    time.Now(),
+			Expiration:   r.Params[cfg.ExpirationKey],
+			ReplyTo:      r.Params[cfg.ReplyToKey],
+			MessageId:    r.Params[cfg.MessageIdKey],
+			DeliveryMode: PersistentDeliveryMode, // Garantindo persistência em todas as mensagens
 		}
 
 		if len(r.Headers["Content-Type"]) > 0 {
@@ -128,6 +134,9 @@ func (f backendFactory) initProducer(ctx context.Context, remote *config.Backend
 			return nil, fmt.Errorf("connection not available, trying to reconnect")
 		}
 
+		// Log de debug para confirmar que estamos enviando mensagem persistente
+		f.logger.Debug(logPrefix, fmt.Sprintf("Publishing message to %s with persistent delivery mode", cfg.Exchange))
+
 		if err := connHandler.conn.ch.Publish(
 			cfg.Exchange,
 			routingKey,
@@ -146,7 +155,14 @@ func (f backendFactory) initProducer(ctx context.Context, remote *config.Backend
 			return nil, err
 		}
 
-		return &proxy.Response{IsComplete: true}, nil
+		return &proxy.Response{
+			IsComplete: true,
+			Metadata: proxy.Metadata{
+				Headers: map[string][]string{
+					"X-AMQP-Persistent": {"true"},
+				},
+			},
+		}, nil
 	}, nil
 }
 
@@ -156,10 +172,11 @@ func (h *connectionHandler) newProducer(dns string, cfg *producerCfg, maxRetries
 		return fmt.Errorf("getting the channel for %s/%s: %s", dns, cfg.Name, err.Error())
 	}
 
+	// Garantindo que o exchange seja durável também
 	if err := h.conn.ch.ExchangeDeclare(
 		cfg.Exchange, // name
 		"topic",      // type
-		cfg.Durable,
+		true,         // Forçando durable como true para o exchange
 		cfg.Delete,
 		cfg.Exclusive,
 		cfg.NoWait,
@@ -169,5 +186,6 @@ func (h *connectionHandler) newProducer(dns string, cfg *producerCfg, maxRetries
 		return fmt.Errorf("declaring the exchange for %s/%s: %s", dns, cfg.Name, err.Error())
 	}
 
+	h.logger.Debug(h.logPrefix, fmt.Sprintf("Producer connected to %s with persistent delivery mode configured", dns))
 	return nil
 }
